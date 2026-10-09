@@ -9,7 +9,7 @@ def create_database():
         id INTEGER PRIMARY KEY,
         filename TEXT NOT NULL,
         extension TEXT NOT NULL,
-        path TEXT NOT NULL
+        path TEXT NOT NULL UNIQUE
     )
     """)
 
