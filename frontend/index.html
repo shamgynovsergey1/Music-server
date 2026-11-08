@@ -1,0 +1,417 @@
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Music Server</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            padding: 24px;
+            background: #111318;
+            color: #f1f1f1;
+            font-family: Arial, sans-serif;
+        }
+
+        main {
+            max-width: 850px;
+            margin: 0 auto;
+        }
+
+        h1 {
+            margin-bottom: 8px;
+        }
+
+        .subtitle {
+            color: #9da3af;
+            margin-bottom: 24px;
+        }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            margin-bottom: 18px;
+        }
+
+        input, button {
+            padding: 12px 14px;
+            border: 1px solid #353945;
+            border-radius: 10px;
+            font-size: 15px;
+        }
+
+        input {
+            flex: 1;
+            min-width: 160px;
+            background: #1c2028;
+            color: white;
+        }
+
+        button {
+            background: #292e39;
+            color: white;
+            cursor: pointer;
+        }
+
+        button:hover {
+            background: #3a4150;
+        }
+
+        button.active {
+            background: #7255d9;
+            border-color: #7255d9;
+        }
+
+        #track-list {
+            display: grid;
+            gap: 12px;
+        }
+
+        .track {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 16px;
+            background: #1b1f27;
+            border: 1px solid #2d323d;
+            border-radius: 14px;
+        }
+
+        .track-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .track-name {
+            overflow-wrap: anywhere;
+            font-weight: bold;
+            margin-bottom: 6px;
+        }
+
+        .track-extension {
+            color: #9da3af;
+            font-size: 13px;
+        }
+
+        .favorite-button {
+            font-size: 20px;
+            border: none;
+            background: transparent;
+            padding: 8px;
+        }
+
+        .favorite-button.selected {
+            color: #ffd45c;
+        }
+
+        .play-button {
+            background: #7255d9;
+        }
+
+        audio {
+            width: 100%;
+            margin-top: 12px;
+        }
+
+        #status {
+            color: #aeb4c0;
+            margin: 16px 0;
+        }
+
+        @media (max-width: 500px) {
+            body {
+                padding: 16px;
+            }
+
+            .track {
+                flex-wrap: wrap;
+            }
+
+            .track-info {
+                width: calc(100% - 60px);
+            }
+
+            .play-button {
+                flex: 1;
+            }
+        }
+    </style>
+</head>
+
+<body>
+<main>
+    <h1>🎵 My Music Server</h1>
+    <div class="subtitle">Твои демки — в одном месте</div>
+
+    <div class="controls">
+        <input
+            id="search-input"
+            type="search"
+            placeholder="Найти трек..."
+        >
+        <button id="search-button">Поиск</button>
+        <button id="sort-button">Сортировка: А–Я</button>
+        <button id="favorites-button">☆ Избранное</button>
+        <button id="refresh-button">Обновить</button>
+    </div>
+
+    <div id="status">Загружаю треки...</div>
+    <div id="track-list"></div>
+
+    <audio id="audio-player" controls></audio>
+</main>
+
+<script>
+    const API_URL = "";
+
+    const searchInput = document.getElementById("search-input");
+    const searchButton = document.getElementById("search-button");
+    const sortButton = document.getElementById("sort-button");
+    const favoritesButton = document.getElementById("favorites-button");
+    const refreshButton = document.getElementById("refresh-button");
+    const trackList = document.getElementById("track-list");
+    const status = document.getElementById("status");
+    const audioPlayer = document.getElementById("audio-player");
+
+    const FAVORITES_KEY = "music-server-favorites";
+
+    let tracks = [];
+    let favoritesOnly = false;
+    let reverseSort = false;
+
+    function getFavorites() {
+        try {
+            const saved = JSON.parse(
+                localStorage.getItem(FAVORITES_KEY) || "[]"
+            );
+
+            return new Set(
+                Array.isArray(saved) ? saved : []
+            );
+        } catch {
+            return new Set();
+        }
+    }
+
+    function saveFavorites(favorites) {
+        localStorage.setItem(
+            FAVORITES_KEY,
+            JSON.stringify([...favorites])
+        );
+    }
+
+    function getTrackKey(track) {
+        return track.filename;
+    }
+
+    function getAudioUrl(track) {
+        if (track.audio_url) {
+            return track.audio_url;
+        }
+
+        return "/tracks/" +
+            encodeURIComponent(track.filename) +
+            "/file";
+    }
+
+    async function loadTracks() {
+        status.textContent = "Загружаю треки...";
+
+        try {
+            const response = await fetch(API_URL + "/tracks");
+
+            if (!response.ok) {
+                throw new Error("Ошибка загрузки треков");
+            }
+
+            const data = await response.json();
+
+            tracks = Array.isArray(data) ? data : data.tracks;
+
+            if (!Array.isArray(tracks)) {
+                throw new Error("Неожиданный формат ответа API");
+            }
+
+            renderTracks();
+        } catch (error) {
+            status.textContent =
+                "Не удалось загрузить треки. Проверь, запущен ли сервер.";
+            trackList.replaceChildren();
+            console.error(error);
+        }
+    }
+
+    async function searchTracks() {
+        const query = searchInput.value.trim();
+
+        if (!query) {
+            await loadTracks();
+            return;
+        }
+
+        status.textContent = "Ищу треки...";
+
+        try {
+            const response = await fetch(
+                API_URL + "/tracks/search?q=" +
+                encodeURIComponent(query)
+            );
+
+            if (!response.ok) {
+                throw new Error("Ошибка поиска");
+            }
+
+            const data = await response.json();
+
+            tracks = Array.isArray(data) ? data : data.tracks;
+
+            if (!Array.isArray(tracks)) {
+                throw new Error("Неожиданный формат ответа API");
+            }
+
+            renderTracks();
+        } catch (error) {
+            status.textContent = "Не удалось выполнить поиск.";
+            trackList.replaceChildren();
+            console.error(error);
+        }
+    }
+
+    function renderTracks() {
+        const favorites = getFavorites();
+
+        let visibleTracks = [...tracks];
+
+        visibleTracks.sort((a, b) =>
+            a.filename.localeCompare(
+                b.filename,
+                "ru",
+                { sensitivity: "base" }
+            )
+        );
+
+        if (reverseSort) {
+            visibleTracks.reverse();
+        }
+
+        if (favoritesOnly) {
+            visibleTracks = visibleTracks.filter(track =>
+                favorites.has(getTrackKey(track))
+            );
+        }
+
+        trackList.replaceChildren();
+
+        status.textContent =
+            "Треков: " + visibleTracks.length +
+            (favoritesOnly ? " · только избранное" : "");
+
+        favoritesButton.classList.toggle("active", favoritesOnly);
+        favoritesButton.textContent = favoritesOnly
+            ? "★ Все треки"
+            : "☆ Избранное";
+
+        sortButton.textContent = reverseSort
+            ? "Сортировка: Я–А"
+            : "Сортировка: А–Я";
+
+        if (visibleTracks.length === 0) {
+            status.textContent = favoritesOnly
+                ? "В избранном пока нет треков."
+                : "Треки не найдены.";
+            return;
+        }
+
+        for (const track of visibleTracks) {
+            const key = getTrackKey(track);
+            const isFavorite = favorites.has(key);
+
+            const card = document.createElement("div");
+            card.className = "track";
+
+            const info = document.createElement("div");
+            info.className = "track-info";
+
+            const name = document.createElement("div");
+            name.className = "track-name";
+            name.textContent = track.filename;
+
+            const extension = document.createElement("div");
+            extension.className = "track-extension";
+            extension.textContent = track.extension || "Аудиотрек";
+
+            info.append(name, extension);
+
+            const favoriteButton = document.createElement("button");
+            favoriteButton.className = "favorite-button" +
+                (isFavorite ? " selected" : "");
+            favoriteButton.textContent = isFavorite ? "★" : "☆";
+            favoriteButton.title = isFavorite
+                ? "Убрать из избранного"
+                : "Добавить в избранное";
+
+            favoriteButton.addEventListener("click", () => {
+                const updatedFavorites = getFavorites();
+
+                if (updatedFavorites.has(key)) {
+                    updatedFavorites.delete(key);
+                } else {
+                    updatedFavorites.add(key);
+                }
+
+                saveFavorites(updatedFavorites);
+                renderTracks();
+            });
+
+            const playButton = document.createElement("button");
+            playButton.className = "play-button";
+            playButton.textContent = "▶ Слушать";
+
+            playButton.addEventListener("click", () => {
+                audioPlayer.src = getAudioUrl(track);
+                audioPlayer.play().catch(error => {
+                    console.error(error);
+                    status.textContent =
+                        "Не удалось воспроизвести трек.";
+                });
+            });
+
+            card.append(info, favoriteButton, playButton);
+            trackList.appendChild(card);
+        }
+    }
+
+    searchButton.addEventListener("click", searchTracks);
+
+    searchInput.addEventListener("keydown", event => {
+        if (event.key === "Enter") {
+            searchTracks();
+        }
+    });
+
+    sortButton.addEventListener("click", () => {
+        reverseSort = !reverseSort;
+        renderTracks();
+    });
+
+    favoritesButton.addEventListener("click", () => {
+        favoritesOnly = !favoritesOnly;
+        renderTracks();
+    });
+
+    refreshButton.addEventListener("click", () => {
+        searchInput.value = "";
+        loadTracks();
+    });
+
+    loadTracks();
+</script>
+</body>
+</html>
